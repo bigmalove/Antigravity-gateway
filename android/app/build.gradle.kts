@@ -4,16 +4,16 @@ plugins {
 }
 
 android {
-    namespace = "org.antigravity.gateway"
+    namespace = "com.antigravity.gateway"
     compileSdk = 34
     ndkVersion = "26.3.11579264"
 
     defaultConfig {
-        applicationId = "org.antigravity.gateway"
+        applicationId = "com.antigravity.gateway"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.0.13"
+        versionCode = 14
+        versionName = "1.0.14-wonghak二改"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -30,6 +30,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.EnvConfigActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".service.GatewayService"
             android:exported="false"

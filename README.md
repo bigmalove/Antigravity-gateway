@@ -58,7 +58,7 @@
 
 ### 📖 项目简介
 
-**Antigravity Gateway for Android**（包名 `org.antigravity.gateway`）是专为 Android 平台定制的极简本地 OpenAI Chat Completions 防截断代理网关。
+**Antigravity Gateway for Android**（包名 `com.antigravity.gateway`）是专为 Android 平台定制的极简本地 OpenAI Chat Completions 防截断代理网关。
 
 移动端通过 JNI 内嵌编译好的 Go 原生核心动态库（`libantigravity.so`），无需依赖任何云端中转或外部服务器，直接在 Android 手机/平板/车机/模拟器本地启动防截断网关，彻底解决 **SillyTavern 酒馆、Cherry Studio、NextChat** 等客户端在移动设备上游玩时的回答截断、Gemini/CPA 轮次 400 报错及未闭合 Markdown/JSON 代码块问题。
 
@@ -68,7 +68,7 @@
 
 #### 场景 A：Android 用户（推荐普通用户）
 
-1. 打开 [Releases](https://github.com/Xeltra233/Antigravity-gateway/releases/latest)，下载 `antigravity-gateway-v<版本>.apk`（当前为 `v1.0.13`）。
+1. 打开 [Releases](https://github.com/Xeltra233/Antigravity-gateway/releases/latest)，下载 `antigravity-gateway-v<版本>.apk`（当前为 `v1.0.14-wonghak二改`）。
 2. 在手机上安装 APK（首次安装需允许「安装未知来源应用」）。
 3. 打开应用 → 点击「切换/新建」填写上游供应商：
    - **上游地址**：如 `https://api.openai.com/v1`（或任何兼容 Chat Completions 的服务）
@@ -177,8 +177,8 @@ curl http://127.0.0.1:38472/v1/models -H "Authorization: Bearer sk-agw-local"
 
 | 位置 | 路径 | 适用场景 |
 | --- | --- | --- |
-| 应用私有目录 | `/data/data/org.antigravity.gateway/files/crash-logs/` | 应用内「查看崩溃日志」读取；需 root/`run-as` 才能在电脑上直接取 |
-| 应用外部目录 | `/sdcard/Android/data/org.antigravity.gateway/files/crash-logs/` | **Android 10 及以下**：文件管理器 / USB / `adb pull` 直接可读 |
+| 应用私有目录 | `/data/data/com.antigravity.gateway/files/crash-logs/` | 应用内「查看崩溃日志」读取；需 root/`run-as` 才能在电脑上直接取 |
+| 应用外部目录 | `/sdcard/Android/data/com.antigravity.gateway/files/crash-logs/` | **Android 10 及以下**：文件管理器 / USB / `adb pull` 直接可读 |
 | 公共下载目录 | `/sdcard/Download/AntigravityGateway/` | **Android 11 及以上**：系统文件管理器、微信、QQ 都能直接打开（通过 MediaStore 写入，无需存储权限） |
 
 报告内容包含时间、应用版本、设备型号、Android 版本、ABI、线程名与完整堆栈；每个位置最多保留最新 5 份，自动清理旧文件。
@@ -212,7 +212,7 @@ adb logcat -s CrashReporter:I AndroidRuntime:E
 adb pull /sdcard/Download/AntigravityGateway/ ./crash-logs/
 
 # Android 10 及以下还可以拉取应用外部目录
-adb pull /sdcard/Android/data/org.antigravity.gateway/files/crash-logs/ ./crash-logs/
+adb pull /sdcard/Android/data/com.antigravity.gateway/files/crash-logs/ ./crash-logs/
 ```
 
 ---
@@ -233,7 +233,7 @@ adb pull /sdcard/Android/data/org.antigravity.gateway/files/crash-logs/ ./crash-
 │  └───────────────────────┘              │              │
 │                                         │              │
 │  ┌──────────────────────────────────────▼───────────┐  │
-│  │ JNI Bridge (org.antigravity.gateway.bridge)      │  │
+│  │ JNI Bridge (com.antigravity.gateway.bridge)      │  │
 │  └──────────────────────┬───────────────────────────┘  │
 └─────────────────────────┼──────────────────────────────┘
                           │ CGO / JNI
@@ -272,7 +272,7 @@ cd android
 ./gradlew :app:assembleRelease
 
 # 产物输出路径:
-# android/app/build/outputs/apk/release/antigravity-gateway-v1.0.13.apk
+# android/app/build/outputs/apk/release/antigravity-gateway-v1.0.14-wonghak二改.apk
 ```
 
 ---
@@ -312,7 +312,7 @@ cd Antigravity-gateway
 - **查看版本信息**:
   ```bash
   ./gateway -v
-  # 输出: Antigravity Gateway version 1.0.13 (commit: ..., built: ...)
+  # 输出: Antigravity Gateway version 1.0.14-wonghak二改 (commit: ..., built: ...)
   ```
 
 - **跨平台交叉编译 (在一台机器上为其他系统编译)**:
@@ -351,6 +351,9 @@ cd Antigravity-gateway
 | `WRAPPER_MODE` | 否 | `prefer` | 包装模式：`prefer`（推荐，自适应注入合成协议）、`required`（强制要求）、`off`（紧急透明透传回滚） |
 | `RECOVERY_POLICY` | 否 | `repair` | 格式恢复策略：`repair`（本地确定性修复）、`repair_then_retry`（单次安全重试）、`fail`（直接报错） |
 | `UPSTREAM_EMPTY_RETRIES` | 否 | `3` | 上游空回（完全没有任何输出）时的自动重试次数 |
+| `NATIVE_STREAM` | 否 | `false` | 原生流式传输（Preview）：开启后可翻译的纯文本流式请求改用上游原生 `streamGenerateContent` + `streamFunctionCallArguments`，上游每产生一段 `partialArgs` 网关立即还原为 `delta.content` 发送，不再等工具参数完整后一次性返回。适用于上游支持 Vertex/Gemini 原生协议（aiplatform.googleapis.com / generativelanguage.googleapis.com）的场景；响应头 `x-anti-truncation-transport: tool-transport-native-streaming` 标识生效。**上游仅支持 OpenAI 兼容接口时请勿开启**：此时会返回明确的 502 错误（`native_upstream_not_sse`）并附带排查提示，不会静默失败 |
+| `NATIVE_STREAM_URL_TEMPLATE` | 否 | 从 `UPSTREAM_BASE_URL` 推导 | 原生流式地址模板，`{model}` 占位符自动替换为模型名（去除 `google/` 前缀）。默认为 Vertex publishers 路径（先去除基址的 `/endpoints/openapi` 后缀）；Gemini Developer API 示例：`https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse` |
+| `NATIVE_STREAM_AUTH_STYLE` | 否 | `bearer` | 原生接口鉴权：`bearer`（`Authorization: Bearer <UPSTREAM_API_KEY>`）或 `goog`（`x-goog-api-key: <UPSTREAM_API_KEY>`） |
 | `CONTROL_MESSAGE_ROLE` | 否 | `system` | 控制提示词角色：`system` 或 `developer` |
 | `CONTROL_MESSAGE_POSITION`| 否 | `tail` | 控制提示词注入位置：`tail`（末尾强生效）、`head`、`system_tail` |
 | `SYNTHETIC_TOOL_PREFIX` | 否 | `agw_emit_` | 动态合成工具的前缀（用于生成 96-bit 随机工具名） |
@@ -572,8 +575,8 @@ curl -X POST http://127.0.0.1:8080/admin/keys/key_7f8a91b2c3d4/revoke \
 
 ### 🛡️ 运维监控与健康检查
 
-- **存活探针 (Liveness)**: `GET /healthz` → 返回 `{"status":"ok","version":"1.0.13"}` (200 OK)
-- **就绪探针 (Readiness)**: `GET /readyz` → 返回 `{"status":"ready","version":"1.0.13"}` (200 OK)
+- **存活探针 (Liveness)**: `GET /healthz` → 返回 `{"status":"ok","version":"1.0.14-wonghak二改"}` (200 OK)
+- **就绪探针 (Readiness)**: `GET /readyz` → 返回 `{"status":"ready","version":"1.0.14-wonghak二改"}` (200 OK)
 - **Prometheus 监控指标**: `GET /metrics` → 输出请求总量、活跃请求数、过载拒绝、合成包装命中/修复/重试/冲突等指标。
 - **紧急回滚**: 若遇到突发未知上游格式异常，修改 `.env` 中的 `WRAPPER_MODE=off` 并重启网关，即可切换为原生纯透传模式。
 
@@ -590,7 +593,7 @@ Antigravity-gateway/
 ├── internal/             # 防截断核心：请求改写、流式拼接、重试与熔断
 ├── pkg/                  # 可复用库：上游适配、日志、配置加载
 ├── android/              # Android 工程（Kotlin + Gradle）
-│   └── app/src/main/java/org/antigravity/gateway/
+│   └── app/src/main/java/com/antigravity/gateway/
 │       ├── GatewayApplication.kt   # 启动流程（主题、崩溃采集、安全模式）
 │       ├── bridge/                 # JNI 调用封装（Go 核心）
 │       ├── data/                   # 配置模型、Keystore 加密、主题偏好
@@ -605,7 +608,7 @@ Antigravity-gateway/
 ### 📦 版本与发布流程
 
 - **版本号**同时写入 4 处并保持一致：`android/app/build.gradle.kts`（`versionCode`/`versionName`）、`cmd/gateway/main.go`、`internal/*/engine.go`、本 README。
-- 推送形如 `v1.0.13` 的 **标签** 即触发 `.github/workflows/release.yml`：
+- 推送形如 `v1.0.14-wonghak二改` 的 **标签** 即触发 `.github/workflows/release.yml`：
   1. 编译 Android APK（debug/release 双构建 + 单元测试 + lint）；
   2. 交叉编译 6 个服务端二进制（Linux/Windows/macOS × amd64/arm64）；
   3. 通过 `ldflags -X main.Version=<tag>` 把版本号与 commit SHA 注入二进制；
@@ -613,10 +616,10 @@ Antigravity-gateway/
 - **校验发布产物**：
 
 ```bash
-gh release view v1.0.13                                   # 资产列表
+gh release view v1.0.14-wonghak二改                                   # 资产列表
 sha256sum -c checksums.txt                                # 校验下载文件
-antigravity-gateway --version                             # v1.0.13 (commit: ...)
-aapt2 dump badging antigravity-gateway-v1.0.13.apk | head -1   # APK 版本
+antigravity-gateway --version                             # v1.0.14-wonghak二改 (commit: ...)
+aapt2 dump badging antigravity-gateway-v1.0.14-wonghak二改.apk | head -1   # APK 版本
 ```
 
 - **升级约定**：已发布版本不再修改；每个变更批次递增补丁号并重新走完整验证（单元测试 → 真机/模拟器用例 → 发布校验）。
@@ -650,7 +653,7 @@ aapt2 dump badging antigravity-gateway-v1.0.13.apk | head -1   # APK 版本
 
 ### Overview
 
-**Antigravity Gateway for Android** (`org.antigravity.gateway`) is a standalone, lightweight Android application delivering an embedded OpenAI Chat Completions anti-truncation proxy gateway.
+**Antigravity Gateway for Android** (`com.antigravity.gateway`) is a standalone, lightweight Android application delivering an embedded OpenAI Chat Completions anti-truncation proxy gateway.
 
 By embedding the high-performance Go native core (`libantigravity.so`) via JNI, the app acts as a local proxy on your Android phone, tablet, emulator, or head unit. It completely resolves truncation, missing code block enclosures, and Gemini/CPA trailing turn 400 errors for clients such as **SillyTavern, Cherry Studio, and NextChat**.
 
@@ -660,7 +663,7 @@ By embedding the high-performance Go native core (`libantigravity.so`) via JNI, 
 
 #### Option A — Android (end users)
 
-1. Download `antigravity-gateway-v<version>.apk` (currently `v1.0.13`) from [Releases](https://github.com/Xeltra233/Antigravity-gateway/releases/latest).
+1. Download `antigravity-gateway-v<version>.apk` (currently `v1.0.14-wonghak二改`) from [Releases](https://github.com/Xeltra233/Antigravity-gateway/releases/latest).
 2. Install it (allow "install from unknown sources" the first time).
 3. Open the app → tap **切换/新建** to add an upstream provider: base URL (e.g. `https://api.openai.com/v1`) and your upstream API key.
 4. Tap **启动网关** and wait for the status card to show **网关运行中**.
@@ -736,8 +739,8 @@ The same report is written to several locations so that every Android version ha
 
 | Location | Path | When it is usable |
 | --- | --- | --- |
-| Private app dir | `/data/data/org.antigravity.gateway/files/crash-logs/` | Read by the in-app viewer; over ADB only with root/`run-as` |
-| App-external dir | `/sdcard/Android/data/org.antigravity.gateway/files/crash-logs/` | **Android 10 and below**: file managers, MTP, `adb pull` |
+| Private app dir | `/data/data/com.antigravity.gateway/files/crash-logs/` | Read by the in-app viewer; over ADB only with root/`run-as` |
+| App-external dir | `/sdcard/Android/data/com.antigravity.gateway/files/crash-logs/` | **Android 10 and below**: file managers, MTP, `adb pull` |
 | Public Downloads | `/sdcard/Download/AntigravityGateway/` | **Android 11+**: system file manager, chat apps, `adb pull` — written through MediaStore, no storage permission required |
 
 Each report contains timestamp, app version, device model, Android version, ABIs, thread name and the full stack trace. Only the newest 5 files are kept per location; older ones are deleted automatically.
@@ -764,7 +767,7 @@ Every launch is counted. If **3 consecutive** launches fail to reach the UI (e.g
 ```bash
 adb logcat -s CrashReporter:I AndroidRuntime:E              # live crash records
 adb pull /sdcard/Download/AntigravityGateway/ ./crash-logs/  # Android 11+
-adb pull /sdcard/Android/data/org.antigravity.gateway/files/crash-logs/ ./crash-logs/  # Android ≤ 10
+adb pull /sdcard/Android/data/com.antigravity.gateway/files/crash-logs/ ./crash-logs/  # Android ≤ 10
 ```
 
 ---
@@ -783,7 +786,7 @@ adb pull /sdcard/Android/data/org.antigravity.gateway/files/crash-logs/ ./crash-
 cd android
 ./gradlew :app:testReleaseUnitTest
 ./gradlew :app:assembleRelease
-# Output APK: android/app/build/outputs/apk/release/antigravity-gateway-v1.0.13.apk
+# Output APK: android/app/build/outputs/apk/release/antigravity-gateway-v1.0.14-wonghak二改.apk
 ```
 
 ---
@@ -1048,8 +1051,8 @@ The gateway is 100% compliant with standard OpenAI `/v1` endpoints.
 
 ### 🛡️ Health Checks & Observability
 
-- **Liveness Probe**: `GET /healthz` → returns `{"status":"ok","version":"1.0.13"}` (200 OK)
-- **Readiness Probe**: `GET /readyz` → returns `{"status":"ready","version":"1.0.13"}` (200 OK)
+- **Liveness Probe**: `GET /healthz` → returns `{"status":"ok","version":"1.0.14-wonghak二改"}` (200 OK)
+- **Readiness Probe**: `GET /readyz` → returns `{"status":"ready","version":"1.0.14-wonghak二改"}` (200 OK)
 - **Prometheus Metrics**: `GET /metrics` → exports standard metrics including request totals, latencies, active connections, and synthetic wrapper counts.
 - **Emergency Fallback**: Set `WRAPPER_MODE=off` in `.env` and restart the gateway to revert to transparent raw passthrough.
 
@@ -1066,7 +1069,7 @@ Antigravity-gateway/
 ├── internal/             # anti-truncation core: rewriting, streaming, retry/circuit breaker
 ├── pkg/                  # reusable libraries: upstream adapters, logging, config loading
 ├── android/              # Android project (Kotlin + Gradle)
-│   └── app/src/main/java/org/antigravity/gateway/
+│   └── app/src/main/java/com/antigravity/gateway/
 │       ├── GatewayApplication.kt   # startup: theme, crash recorder, safe mode
 │       ├── bridge/                 # JNI wrapper around the Go core
 │       ├── data/                   # config models, Keystore crypto, theme preferences
@@ -1089,10 +1092,10 @@ Antigravity-gateway/
 - Verify a release:
 
 ```bash
-gh release view v1.0.13
+gh release view v1.0.14-wonghak二改
 sha256sum -c checksums.txt
-antigravity-gateway --version                                  # v1.0.13 (commit: ...)
-aapt2 dump badging antigravity-gateway-v1.0.13.apk | head -1    # APK version
+antigravity-gateway --version                                  # v1.0.14-wonghak二改 (commit: ...)
+aapt2 dump badging antigravity-gateway-v1.0.14-wonghak二改.apk | head -1    # APK version
 ```
 
 - Published versions are immutable: every change batch bumps the patch level and repeats the full verification chain (unit tests → device checks → release validation).

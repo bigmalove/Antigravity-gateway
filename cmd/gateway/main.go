@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	Version   = "1.0.13"
+	Version   = "1.0.14-wonghak二改"
 	GitCommit = "none"
 	BuildTime = "unknown"
 )

@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 	"antigravity-gateway/internal/limiter"
 	"antigravity-gateway/internal/limits"
 	"antigravity-gateway/internal/metrics"
+	"antigravity-gateway/internal/native"
 	"antigravity-gateway/internal/proxy"
 	"antigravity-gateway/internal/server"
 	"antigravity-gateway/internal/synthetic"
@@ -287,6 +289,22 @@ func (o *Orchestrator) attemptSingleFormatRetry(ctx context.Context, originalBod
 }
 
 func (o *Orchestrator) handleStreaming(w http.ResponseWriter, ctx context.Context, injected *synthetic.InjectedRequest, reqID string) {
+	// Native streaming transport: when enabled, eligible text requests are
+	// translated to Vertex/Gemini streamGenerateContent with
+	// streamFunctionCallArguments so incremental partialArgs reach the client
+	// as they are produced. Ineligible requests keep the OpenAI-compatible
+	// synthetic-tool transport below.
+	if o.cfg.NativeStream && injected.SyntheticToolName != "" && !injected.HasDownstreamTools && !injected.ForcedRealTool {
+		var bodyMap map[string]any
+		if err := json.Unmarshal(injected.TransformedBody, &bodyMap); err == nil {
+			if native.SupportsNativeTextStream(bodyMap, injected.SyntheticToolName) {
+				o.handleStreamingNative(w, ctx, injected, bodyMap, reqID)
+				return
+			}
+			slog.Info("native stream skipped: request is not translatable, using compatible transport", "request_id", reqID)
+		}
+	}
+
 	upstreamReq, err := o.client.NewUpstreamRequest(ctx, http.MethodPost, o.cfg.UpstreamChatURL(), bytes.NewReader(injected.TransformedBody), reqID)
 	if err != nil {
 		server.WriteError(w, http.StatusInternalServerError, "Failed to create upstream request", "api_error", "internal_error")
@@ -372,6 +390,121 @@ func (o *Orchestrator) handleStreaming(w http.ResponseWriter, ctx context.Contex
 			slog.Warn("streaming upstream response exceeded configured size limit", "request_id", reqID)
 		} else {
 			slog.Warn("failed to transform streaming upstream response", "request_id", reqID, "err", transformErr)
+		}
+	}
+	if stats != nil {
+		if stats.SyntheticHit {
+			metrics.Default.SyntheticHits.Add(1)
+		}
+		if stats.ContentConflict {
+			metrics.Default.SyntheticConflicts.Add(1)
+		}
+	}
+}
+
+func (o *Orchestrator) handleStreamingNative(w http.ResponseWriter, ctx context.Context, injected *synthetic.InjectedRequest, bodyMap map[string]any, reqID string) {
+	nativeBody, err := native.BuildNativeTextBody(bodyMap, injected.SyntheticToolName)
+	if err != nil {
+		server.WriteError(w, http.StatusInternalServerError, "Failed to build native request: "+err.Error(), "api_error", "internal_error")
+		return
+	}
+	nativeBodyBytes, err := json.Marshal(nativeBody)
+	if err != nil {
+		server.WriteError(w, http.StatusInternalServerError, "Failed to marshal native request", "api_error", "internal_error")
+		return
+	}
+
+	targetURL := o.cfg.NativeStreamURL(injected.OriginalModel)
+	upstreamReq, err := o.client.NewUpstreamRequest(ctx, http.MethodPost, targetURL, bytes.NewReader(nativeBodyBytes), reqID)
+	if err != nil {
+		server.WriteError(w, http.StatusInternalServerError, "Failed to create upstream request", "api_error", "internal_error")
+		return
+	}
+	if o.cfg.NativeStreamAuthStyle == "goog" && o.cfg.UpstreamAPIKey != "" {
+		upstreamReq.Header.Del("Authorization")
+		upstreamReq.Header.Set("x-goog-api-key", o.cfg.UpstreamAPIKey)
+	}
+
+	resp, err := o.client.Do(upstreamReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		server.WriteError(w, http.StatusBadGateway, "Native upstream connection failed: "+err.Error(), "api_error", "upstream_error")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, readErr := limits.ReadAll(resp.Body, o.cfg.MaxResponseBytes)
+		if readErr != nil && !errors.Is(readErr, limits.ErrExceeded) {
+			server.WriteError(w, http.StatusBadGateway, "Failed to read native upstream response", "api_error", "upstream_error")
+			return
+		}
+		msg := fmt.Sprintf("Native upstream returned status %d", resp.StatusCode)
+		if len(respBody) > 0 {
+			const maxDetail = 4000
+			detail := string(respBody)
+			if len(detail) > maxDetail {
+				detail = detail[:maxDetail]
+			}
+			msg = msg + ": " + detail
+		}
+		server.WriteError(w, http.StatusBadGateway, msg, "api_error", "upstream_error")
+		return
+	}
+
+	// Guard: NATIVE_STREAM only works against upstreams that actually speak
+	// the Vertex/Gemini native streaming protocol. An upstream without it
+	// (e.g. an OpenAI-compatible-only aggregator) commonly answers this path
+	// with an HTML portal or a JSON error while still returning HTTP 200 —
+	// and the stream would otherwise end as a silently empty response. Detect
+	// it here, before any downstream headers are committed, and surface an
+	// actionable error instead.
+	//
+	// Fast path: a proper "text/event-stream" response is passed straight
+	// through without peeking (peeking must never add latency to live
+	// streams). Only a mislabelled or suspicious response is inspected, and
+	// then only far enough to tell an SSE/JSON/text body apart — HTML markup
+	// or a JSON error can never be the start of an SSE stream.
+	bodyReader := bufio.NewReaderSize(resp.Body, 8192)
+	if contentType := resp.Header.Get("Content-Type"); !strings.Contains(strings.ToLower(contentType), "event-stream") {
+		peeked, peekErr := bodyReader.Peek(8)
+		trimmed := bytes.TrimLeft(peeked, " \t\r\n")
+		looksLikeHTMLorJSON := len(trimmed) > 0 && (trimmed[0] == '<' || trimmed[0] == '{')
+		if looksLikeHTMLorJSON || (len(peeked) == 0 && peekErr != nil) {
+			snippet, _ := io.ReadAll(io.LimitReader(bodyReader, 2048))
+			detail := strings.TrimSpace(string(snippet))
+			if len(detail) > 300 {
+				detail = detail[:300] + "..."
+			}
+			server.WriteError(w, http.StatusBadGateway,
+				fmt.Sprintf("Native upstream did not return an SSE stream (content-type: %q). NATIVE_STREAM requires an upstream that supports the Vertex/Gemini native protocol; disable NATIVE_STREAM or point NATIVE_STREAM_URL_TEMPLATE at a native endpoint. Upstream body: %s", contentType, detail),
+				"api_error", "native_upstream_not_sse")
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set("x-anti-truncation-transport", "tool-transport-native-streaming")
+	w.WriteHeader(http.StatusOK)
+
+	flusher, _ := w.(http.Flusher)
+	if flusher != nil {
+		flusher.Flush()
+	}
+
+	limitedBody := limits.NewReader(bodyReader, o.cfg.MaxResponseBytes)
+	transformer := native.NewStreamTransformer(o.cfg, injected.SyntheticToolName, injected.OriginalModel)
+	stats, transformErr := transformer.Transform(limitedBody, w, flusher)
+	if transformErr != nil {
+		if errors.Is(transformErr, limits.ErrExceeded) {
+			slog.Warn("native streaming upstream response exceeded configured size limit", "request_id", reqID)
+		} else {
+			slog.Warn("native streaming transform failed", "request_id", reqID, "err", transformErr)
 		}
 	}
 	if stats != nil {

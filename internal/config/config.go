@@ -50,6 +50,14 @@ type Config struct {
 	TextModelPattern     string // Optional regex override for text models
 	NonTextModelPattern  string // Optional regex override for non-text models
 
+	// Native streaming transport (Vertex/Gemini streamGenerateContent with
+	// streamFunctionCallArguments). When enabled, eligible text requests are
+	// translated to the native protocol so incremental partialArgs reach the
+	// client as they are produced instead of being buffered upstream.
+	NativeStream            bool
+	NativeStreamURLTemplate string // optional; {model} placeholder; default derives the Vertex publishers path from UpstreamBaseURL
+	NativeStreamAuthStyle   string // bearer (Authorization: Bearer) or goog (x-goog-api-key)
+
 	MaxRequestBytes             int64
 	MaxResponseBytes            int64
 	MaxConcurrentRequests       int
@@ -226,6 +234,17 @@ func Load(getenv func(string) string) (*Config, error) {
 	// Upstream Empty Response Retries (default 3)
 	cfg.UpstreamEmptyRetries = getInt(getenv("UPSTREAM_EMPTY_RETRIES"), 3, 0, 10)
 
+	// Native streaming transport
+	cfg.NativeStream = getBool(getenv("NATIVE_STREAM"), false)
+	cfg.NativeStreamURLTemplate = strings.TrimSpace(getenv("NATIVE_STREAM_URL_TEMPLATE"))
+	cfg.NativeStreamAuthStyle = strings.ToLower(strings.TrimSpace(getenv("NATIVE_STREAM_AUTH_STYLE")))
+	if cfg.NativeStreamAuthStyle == "" {
+		cfg.NativeStreamAuthStyle = "bearer"
+	}
+	if cfg.NativeStreamAuthStyle != "bearer" && cfg.NativeStreamAuthStyle != "goog" {
+		return nil, fmt.Errorf("invalid NATIVE_STREAM_AUTH_STYLE: %q (must be 'bearer' or 'goog')", cfg.NativeStreamAuthStyle)
+	}
+
 	// Model Filter Patterns (Regex)
 	cfg.TextModelPattern = strings.TrimSpace(getenv("TEXT_MODEL_PATTERN"))
 	cfg.NonTextModelPattern = strings.TrimSpace(getenv("NON_TEXT_MODEL_PATTERN"))
@@ -284,4 +303,19 @@ func (c *Config) UpstreamChatURL() string {
 
 func (c *Config) UpstreamModelsURL() string {
 	return c.UpstreamBaseURL + "/v1/models"
+}
+
+// NativeStreamURL builds the Vertex/Gemini native streaming endpoint for a
+// model. When NATIVE_STREAM_URL_TEMPLATE is set, {model} is substituted with
+// the model id (a leading "google/" namespace is stripped, matching the bare
+// model name the native APIs expect). Otherwise the Vertex publishers path is
+// derived from the upstream base URL, stripping the OpenAI-compatible
+// "/endpoints/openapi" suffix first (mirroring the reference implementation).
+func (c *Config) NativeStreamURL(model string) string {
+	bare := strings.TrimPrefix(strings.TrimSpace(model), "google/")
+	if c.NativeStreamURLTemplate != "" {
+		return strings.ReplaceAll(c.NativeStreamURLTemplate, "{model}", bare)
+	}
+	base := strings.TrimSuffix(c.UpstreamBaseURL, "/endpoints/openapi")
+	return base + "/publishers/google/models/" + bare + ":streamGenerateContent?alt=sse"
 }

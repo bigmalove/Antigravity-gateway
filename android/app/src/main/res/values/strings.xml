@@ -41,4 +41,15 @@
     <string name="crash_log_share">分享</string>
     <string name="crash_log_location">日志文件位置（可直接拷贝给开发者）：\n%1$s</string>
     <string name="crash_safe_mode_hint">安全模式：检测到连续 %1$d 次启动未成功，已跳过主题等可选初始化。请点下方按钮查看并分享崩溃日志。</string>
+
+    <!-- 高级配置（环境变量） -->
+    <string name="advanced_config_title">高级配置（环境变量）</string>
+    <string name="advanced_config_subtitle">防截断策略、并发限制、流式缓冲、日志等全部环境变量</string>
+    <string name="env_config_title">高级配置（环境变量）</string>
+    <string name="env_config_reset_all">恢复默认</string>
+    <string name="env_config_reset_field">恢复默认</string>
+    <string name="env_config_reset_all_title">恢复全部默认值</string>
+    <string name="env_config_reset_all_message">将清空所有自定义环境变量，恢复内置默认值。确定吗？</string>
+    <string name="env_config_reset_confirm">确定</string>
+    <string name="env_config_bottom_hint">修改后需重启网关生效；留空表示使用默认值。上游地址 / 上游 Key / 下游 Key / 端口请在主界面配置。</string>
 </resources>

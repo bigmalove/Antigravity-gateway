@@ -24,7 +24,10 @@ static jstring create_jstring(JNIEnv *env, const char *str) {
 */
 import "C"
 import (
+	"encoding/json"
+	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -52,14 +55,51 @@ func createJString(env *C.JNIEnv, str string) C.jstring {
 	return C.create_jstring(env, cStr)
 }
 
-//export Java_org_antigravity_gateway_bridge_GatewayBridge_nativeStartGateway
-func Java_org_antigravity_gateway_bridge_GatewayBridge_nativeStartGateway(
+// primaryEnvKeys 是由 Android 主界面（供应商 / 端口 / 下游 Key）管理的字段，
+// 高级配置中的环境变量覆盖不允许篡改它们，保证单一事实来源。
+var primaryEnvKeys = map[string]bool{
+	"UPSTREAM_BASE_URL": true,
+	"UPSTREAM_API_KEY":  true,
+	"API_KEY":           true,
+	"PORT":              true,
+}
+
+// mergeEnvOverrides 把界面传来的 JSON 环境变量覆盖合并进基础 envMap。
+// 规则：
+//   - 主界面管理的四个字段忽略覆盖；
+//   - 空字符串表示「恢复默认」，从 map 中删除该键；
+//   - 未知键无害透传（config.Load 只会读取已知变量）。
+func mergeEnvOverrides(base map[string]string, rawJSON string) error {
+	raw := strings.TrimSpace(rawJSON)
+	if raw == "" || raw == "{}" {
+		return nil
+	}
+	var overrides map[string]string
+	if err := json.Unmarshal([]byte(raw), &overrides); err != nil {
+		return fmt.Errorf("invalid env overrides JSON: %w", err)
+	}
+	for k, v := range overrides {
+		if primaryEnvKeys[k] {
+			continue
+		}
+		if strings.TrimSpace(v) == "" {
+			delete(base, k)
+			continue
+		}
+		base[k] = v
+	}
+	return nil
+}
+
+//export Java_com_antigravity_gateway_bridge_GatewayBridge_nativeStartGateway
+func Java_com_antigravity_gateway_bridge_GatewayBridge_nativeStartGateway(
 	env *C.JNIEnv,
 	clazz C.jclass,
 	jUpstreamUrl C.jstring,
 	jUpstreamKey C.jstring,
 	jDownstreamKey C.jstring,
 	jPort C.jint,
+	jEnvJson C.jstring,
 ) C.jint {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -71,6 +111,7 @@ func Java_org_antigravity_gateway_bridge_GatewayBridge_nativeStartGateway(
 	upstreamUrl := extractJString(env, jUpstreamUrl)
 	upstreamKey := extractJString(env, jUpstreamKey)
 	downstreamKey := extractJString(env, jDownstreamKey)
+	envJson := extractJString(env, jEnvJson)
 	port := int(jPort)
 	if port <= 0 {
 		port = 38472
@@ -93,6 +134,12 @@ func Java_org_antigravity_gateway_bridge_GatewayBridge_nativeStartGateway(
 		"RECOVERY_POLICY":    "repair",
 	}
 
+	// 应用高级配置（环境变量）覆盖
+	if err := mergeEnvOverrides(envMap, envJson); err != nil {
+		lastError = err.Error()
+		return 3
+	}
+
 	getenv := func(key string) string {
 		return envMap[key]
 	}
@@ -108,8 +155,8 @@ func Java_org_antigravity_gateway_bridge_GatewayBridge_nativeStartGateway(
 	return 0
 }
 
-//export Java_org_antigravity_gateway_bridge_GatewayBridge_nativeStopGateway
-func Java_org_antigravity_gateway_bridge_GatewayBridge_nativeStopGateway(
+//export Java_com_antigravity_gateway_bridge_GatewayBridge_nativeStopGateway
+func Java_com_antigravity_gateway_bridge_GatewayBridge_nativeStopGateway(
 	env *C.JNIEnv,
 	clazz C.jclass,
 ) C.jint {
@@ -130,8 +177,8 @@ func Java_org_antigravity_gateway_bridge_GatewayBridge_nativeStopGateway(
 	return 0
 }
 
-//export Java_org_antigravity_gateway_bridge_GatewayBridge_nativeIsRunning
-func Java_org_antigravity_gateway_bridge_GatewayBridge_nativeIsRunning(
+//export Java_com_antigravity_gateway_bridge_GatewayBridge_nativeIsRunning
+func Java_com_antigravity_gateway_bridge_GatewayBridge_nativeIsRunning(
 	env *C.JNIEnv,
 	clazz C.jclass,
 ) C.jboolean {
@@ -144,8 +191,8 @@ func Java_org_antigravity_gateway_bridge_GatewayBridge_nativeIsRunning(
 	return 0
 }
 
-//export Java_org_antigravity_gateway_bridge_GatewayBridge_nativeGetLastError
-func Java_org_antigravity_gateway_bridge_GatewayBridge_nativeGetLastError(
+//export Java_com_antigravity_gateway_bridge_GatewayBridge_nativeGetLastError
+func Java_com_antigravity_gateway_bridge_GatewayBridge_nativeGetLastError(
 	env *C.JNIEnv,
 	clazz C.jclass,
 ) C.jstring {
