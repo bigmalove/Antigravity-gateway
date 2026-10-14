@@ -115,7 +115,24 @@ jobs:
           distribution: 'temurin'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          SDKMANAGER="$(command -v sdkmanager || echo "$SDK/cmdline-tools/latest/bin/sdkmanager")"
+          # GitHub runner images ship the Android SDK preinstalled. Accept
+          # pending licenses so AGP can fetch anything that is missing.
+          # (android-actions/setup-android@v3 is broken on current images: it
+          # tries to install the removed "tools" package and fails.)
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          for pkg in "platform-tools" "platforms;android-34" "build-tools;34.0.0"; do
+            if ! "$SDKMANAGER" --list_installed 2>/dev/null | grep -qF "$pkg"; then
+              yes | "$SDKMANAGER" "$pkg" >/dev/null 2>&1 || true
+            fi
+          done
+          ls "$SDK/platforms" 2>/dev/null || true
+          ls "$SDK/build-tools" 2>/dev/null || true
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
